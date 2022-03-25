@@ -28,7 +28,7 @@ void initialization() {
 
 int main() {
 	initialization();
-	Server s("127.0.0.1", 8022);
+	Server s("192.168.0.100", 8022);
 	s.run();
 	return 0;
 }

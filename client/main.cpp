@@ -28,7 +28,7 @@ void initialization() {
 
 int main() {
 	initialization();
-	Client c("127.0.0.1", 8022);
+	Client c("192.168.0.100", 8022);
 	c.run();
 	return 0;
 }

@@ -1,5 +1,10 @@
 #include "Server.h"
 
+
+std::unordered_map<std::string, int> Server::name_sock_map;
+std::mutex Server::name_sock_lock;
+
+
 Server::Server(const char* ip, int port)
 {
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -42,17 +47,35 @@ void Server::run()
 void Server::RecvMsg(int conn)
 {
 	char recvbuf[1000];
+	connect_info info;
+	/* 
+	 * bool logined;	 客户端是否已经登录
+	 * std::string login_name;	客户端登录用户名
+	 * std::string target_name;	目标客户端用户名
+	 * int target_conn；			目标客户端套接字
+	 */
+	std::get<0>(info) = false;	// logined = false;
+	std::get<3>(info) = -1;		// target_conn = -1;
+
 	while (1) {
 		memset(recvbuf, 0, sizeof(recvbuf));
 		int ret = recv(conn, recvbuf, sizeof(recvbuf), 0);
 		if (ret > 0) {
 			std::cout << "收到消息: " << recvbuf << std::endl;
-			HandleRequest(conn, recvbuf);
+			HandleRequest(conn, recvbuf, info);
 		}
 	}
 }
 
-void Server::HandleRequest(int conn, std::string str) {
+// 客户端的套接字, 接收到的信息, 基本的连接信息
+void Server::HandleRequest(int conn, std::string str, connect_info& info) {
+
+	// 基本的连接信息
+	bool logined = std::get<0>(info);
+	std::string login_name = std::get<1>(info);
+	std::string target_name = std::get<2>(info);
+	int target_conn = std::get<3>(info);
+
 	// connect to mysql server
 	MYSQL mysql;
 	mysql_init(&mysql);
@@ -106,6 +129,13 @@ void Server::HandleRequest(int conn, std::string str) {
 				// 密码正确
 				std::cout << "密码正确\n";
 				sendstr = "[ret]ok";
+
+				name_sock_lock.lock();
+				name_sock_map[name] = conn;	// 加入到name_sock_map表中, 代表用户已登录
+				name_sock_lock.unlock();
+
+				logined = true;
+				login_name = name;
 			}
 			else { // 密码错误
 				sendstr = "[ret]incorrect_password";
@@ -118,5 +148,35 @@ void Server::HandleRequest(int conn, std::string str) {
 		}
 		send(conn, sendstr.c_str(), sendstr.length(), 0);
 	}
+	else if (str.find("[target]") == 0) {	// 设置私聊对象 
+		std::string target = str.substr(8);
+		std::cout << "准备建立从" << login_name << "到" << target << "的连接\n";
+		if (name_sock_map.find(target) == name_sock_map.end()) {
+			// 目标未找到
+			std::cout << "未找到名为" << target << "的目标\n";
+			sendstr = "[ret]not_found";
+		}
+		else {
+			// 找到目标, 建立连接
+			std::cout << "建立从" << login_name << "到" << target_name << "的连接\n";
+			target_name = target;
+			target_conn = name_sock_map[target];
+			sendstr = "[ret]ok";
+		}
+		send(conn, sendstr.c_str(), sendstr.length(), 0);
+	}
+	else if (str.find("[message]") == 0) {
+		// 发送私聊消息
+		sendstr = str.substr(9);	// 去掉前缀"[message]"
+		std::cout << "从" << login_name << "转发消息:\"" << sendstr << "\"到" << target_name << std::endl;
+		sendstr = "[" + login_name + "]" + sendstr;	// 格式化为"[login_name]message..."
+		send(target_conn, sendstr.c_str(), sendstr.length(), 0);
+	}
 
+
+	// 更新基本信息info
+	std::get<0>(info) = logined;
+	std::get<1>(info) = login_name;
+	std::get<2>(info) = target_name;
+	std::get<3>(info) = target_conn;
 }

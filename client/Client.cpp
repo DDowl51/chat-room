@@ -37,6 +37,7 @@ void Client::SendMsg(int conn)
 	while (1) {
 		sendbuf.clear();
 		getline(std::cin, sendbuf);
+		sendbuf = "[message]" + sendbuf;	// 格式化
 		send(conn, sendbuf.c_str(), sendbuf.length(), 0);
 	}
 }
@@ -51,7 +52,7 @@ void Client::RecvMsg(int conn)
 			perror("recv");
 		}
 		if (ret > 0)
-			std::cout << "[server]" << recvbuf << std::endl;
+			std::cout << recvbuf << std::endl;
 	}
 }
 
@@ -181,7 +182,7 @@ void Client::HandleClient(int conn) {
 				recv(conn, recvbuf, sizeof(recvbuf), 0);
 				// 暂时借用一下sendstr变量
 				sendstr = recvbuf;
-				if (sendstr == "[ret]ok") {	// 找到target并且在线
+				if (sendstr == "[ret]ok") {	// 找到target
 					std::cout << "请输入要发送的信息>";
 					std::thread send_thread(SendMsg, conn), recv_thread(RecvMsg, conn);
 					send_thread.join();
@@ -189,12 +190,7 @@ void Client::HandleClient(int conn) {
 				}
 				else if (sendstr == "[ret]not_found") {
 					// 用户不存在
-					std::cout << "用户不存在\n";
-					continue;
-				}
-				else if (sendstr == "[ret]not_online") {
-					// 用户不在线
-					std::cout << "用户不在线\n";
+					std::cout << "未找到用户\n";
 					continue;
 				}
 
