@@ -31,7 +31,7 @@ void Server::run()
 			std::cout << WSAGetLastError() << std::endl;
 		}
 		else
-			std::cout << "与客户端 " << client_sock << " 连接, 准备接受数据\n";
+			std::cout << "\n与客户端[" << client_sock << "]连接, 准备接受数据\n";
 
 
 		std::thread recvThread(RecvMsg, client_sock);
@@ -98,19 +98,22 @@ void Server::HandleRequest(int conn, std::string str) {
 		// SELECT name, pass FROM users WHERE name="name";
 		sqlstatement = "SELECT name, pass FROM users WHERE name=\"" + name + "\";";
 		int ret = mysql_query(&mysql, sqlstatement.c_str());
-		if (!ret) {	// 找到结果
-			MYSQL_RES* result = mysql_store_result(&mysql);
-			MYSQL_ROW sql_row = mysql_fetch_row(result);
+		MYSQL_RES* result = mysql_store_result(&mysql);
+		MYSQL_ROW sql_row = mysql_fetch_row(result);
+		if (!ret && sql_row) {	// 找到结果
 			std::cout << "MYSQL中的数据: name=" << sql_row[0] << ", pass=" << sql_row[1] << std::endl;
 			if (pass == sql_row[1]) {
 				// 密码正确
 				std::cout << "密码正确\n";
 				sendstr = "[ret]ok";
 			}
-			else  // 密码错误
+			else { // 密码错误
 				sendstr = "[ret]incorrect_password";
+				std::cout << "密码错误\n";
+			} 
 		}
 		else {	// 没找到该用户
+			std::cout << "不存在名为" << name << "的用户\n";
 			sendstr = "[ret]not_found";
 		}
 		send(conn, sendstr.c_str(), sendstr.length(), 0);

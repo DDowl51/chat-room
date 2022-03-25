@@ -69,21 +69,55 @@ void Client::HandleClient(int conn) {
 		if (1 == choice) {
 			// [reg]name:pass
 			std::string reg, name, pass, passConfirm;
-			std::cout << "请输入用户名>";
-			std::cin >> name;
+
+			/* 此while循环用于设置用户名 */
+			while (1) {
+				std::cout << "请输入用户名>";
+				std::cin >> name;
+
+				/* ----- 利用正则表达式检测用户名是否符合规范----- */
+				// 只支持数字字母以及下划线，并且字符数量为4-12
+				std::regex name_regex("[_a-zA-Z0-9]{4,12}");
+				if (!std::regex_match(name, name_regex)) {
+					// 用户名不符合规范
+					std::cout << "用户名不符合规范\n";
+					std::cout << "只支持数字字母以及下划线，并且字符数量为4-12\n";
+					continue;
+				}
+				else // 用户名设置成功, 跳出循环
+					break;
+			}
+			/* 此while循环用于设置用户名 */
+
+			/* 此while循环用于设置密码 */
 			while (1) {
 				std::cout << "请输入密码>";
 				std::cin >> pass;
 				std::cout << "请确认密码>";
 				std::cin >> passConfirm;
-				if (pass == passConfirm)
-					break;
-				else
+				if (pass != passConfirm) {
 					std::cout << "两次密码输入不一致!\n";
+					continue;
+				}
+
+				/* ----- 利用正则表达式检测密码是否符合规范----- */
+				// 只支持数字字母以及下划线，并且字符数量为6-15
+				std::regex pass_regex("[_a-zA-Z0-9]{6,15}");
+				if (!std::regex_match(pass, pass_regex)) {
+					// 密码不符合规范
+					std::cout << "密码不符合规范\n";
+					std::cout << "只支持数字字母以及下划线，并且字符数量为6-15\n";
+					continue;
+				}
+				else // 密码设置成功, 跳出循环
+					break;
 			}
+			/* 此while循环用于设置密码 */
+
+			// 设置注册格式: [reg]name:pass
 			reg = "[reg]" + name + ":" + pass;
 			send(conn, reg.c_str(), reg.length(), 0);
-
+			// 接收登录状态
 			memset(recvbuf, 0, sizeof(recvbuf));
 			recv(conn, recvbuf, sizeof(recvbuf), 0);
 			// 暂时借用一下name变量
