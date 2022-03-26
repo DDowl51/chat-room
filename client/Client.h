@@ -1,14 +1,5 @@
 #pragma once
-
-#include <winsock.h>
-#include <iostream>
-#include <string>
-#include <thread>
-#include <mysql.h>
-#include <regex>
-
-
-#pragma comment(lib, "ws2_32.lib")
+#include "global.h"
 
 
 class Client {

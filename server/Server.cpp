@@ -2,8 +2,12 @@
 
 
 std::unordered_map<std::string, int> Server::name_sock_map;
+std::unordered_map<int, std::set<int>> Server::group_sock_map;
 std::mutex Server::name_sock_lock;
+std::mutex Server::group_sock_lock;
 
+
+MYSQL *Server::mysql = mysql_init(mysql);
 
 Server::Server(const char* ip, int port)
 {
@@ -12,9 +16,12 @@ Server::Server(const char* ip, int port)
 	server_addr.sin_family = PF_INET;
 	server_addr.sin_port = htons(port);
 	server_addr.sin_addr.s_addr = inet_addr(ip);
-
-
-
+	
+	if (mysql_real_connect(mysql, "127.0.0.1", "root", "0814", "chatroom", 3306, NULL, 0)) {
+		std::cout << "\n成功连接到mysql数据库\n";
+	}
+	else
+		std::cout << "\n连接到数据库失败\n";
 }
 
 Server::~Server()
@@ -49,10 +56,11 @@ void Server::RecvMsg(int conn)
 	char recvbuf[1000];
 	connect_info info;
 	/* 
-	 * bool logined;	 客户端是否已经登录
+	 * bool logined;			客户端是否已经登录
 	 * std::string login_name;	客户端登录用户名
 	 * std::string target_name;	目标客户端用户名
 	 * int target_conn；			目标客户端套接字
+	 * int group_num			客户端所在群
 	 */
 	std::get<0>(info) = false;	// logined = false;
 	std::get<3>(info) = -1;		// target_conn = -1;
@@ -64,6 +72,12 @@ void Server::RecvMsg(int conn)
 			std::cout << "收到消息: " << recvbuf << std::endl;
 			HandleRequest(conn, recvbuf, info);
 		}
+		else {
+			std::cout << "ret=" << ret << ", 关闭与客户端[" << conn << "]的连接\n";
+			closesocket(conn);
+			name_sock_map.erase(std::get<1>(info));
+			break;
+		}
 	}
 }
 
@@ -71,19 +85,13 @@ void Server::RecvMsg(int conn)
 void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 
 	// 基本的连接信息
-	bool logined = std::get<0>(info);
-	std::string login_name = std::get<1>(info);
-	std::string target_name = std::get<2>(info);
-	int target_conn = std::get<3>(info);
+	bool logined				= std::get<0>(info);
+	std::string login_name		= std::get<1>(info);
+	std::string target_name		= std::get<2>(info);
+	int target_conn				= std::get<3>(info);
+	int group_num				= std::get<4>(info);
 
 	// connect to mysql server
-	MYSQL mysql;
-	mysql_init(&mysql);
-	if (mysql_real_connect(&mysql, "127.0.0.1", "root", "0814", "chatroom", 3306, NULL, 0)) {
-		std::cout << "成功连接到mysql数据库\n";
-	}
-	else
-		std::cout << "连接到数据库失败\n";
 
 	std::string sendstr;
 
@@ -99,7 +107,7 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 		// INSERT INTO users VALUES( "name", "pass" );
 		str = "INSERT INTO users VALUES( \"" + name + "\", \"" + pass + "\");";
 		std::cout << "SQL语句: " << str << std::endl;
-		int ret = mysql_query(&mysql, str.c_str());
+		int ret = mysql_query(mysql, str.c_str());
 		if (ret) {
 			std::cout << "INSERT failed\n";
 			sendstr = "[ret]error";	// register failed
@@ -108,7 +116,7 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 			std::cout << "INSERT success\n";
 			sendstr = "[ret]ok";
 		}
-		send(conn, sendstr.c_str(), sendstr.length(), 0);
+		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
 	}
 	// Login, str="[login]name:pass"
 	else if (str.find("[login]") == 0) {
@@ -120,8 +128,8 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 		std::cout << "pass: " << pass << std::endl;
 		// SELECT name, pass FROM users WHERE name="name";
 		sqlstatement = "SELECT name, pass FROM users WHERE name=\"" + name + "\";";
-		int ret = mysql_query(&mysql, sqlstatement.c_str());
-		MYSQL_RES* result = mysql_store_result(&mysql);
+		int ret = mysql_query(mysql, sqlstatement.c_str());
+		MYSQL_RES* result = mysql_store_result(mysql);
 		MYSQL_ROW sql_row = mysql_fetch_row(result);
 		if (!ret && sql_row) {	// 找到结果
 			std::cout << "MYSQL中的数据: name=" << sql_row[0] << ", pass=" << sql_row[1] << std::endl;
@@ -146,7 +154,7 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 			std::cout << "不存在名为" << name << "的用户\n";
 			sendstr = "[ret]not_found";
 		}
-		send(conn, sendstr.c_str(), sendstr.length(), 0);
+		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
 	}
 	else if (str.find("[target]") == 0) {	// 设置私聊对象 
 		std::string target = str.substr(8);
@@ -163,14 +171,39 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 			target_conn = name_sock_map[target];
 			sendstr = "[ret]ok";
 		}
-		send(conn, sendstr.c_str(), sendstr.length(), 0);
+		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
 	}
 	else if (str.find("[message]") == 0) {
 		// 发送私聊消息
 		sendstr = str.substr(9);	// 去掉前缀"[message]"
-		std::cout << "从" << login_name << "转发消息:\"" << sendstr << "\"到" << target_name << std::endl;
-		sendstr = "[" + login_name + "]" + sendstr;	// 格式化为"[login_name]message..."
-		send(target_conn, sendstr.c_str(), sendstr.length(), 0);
+		if (sendstr == "exit") {
+			// 客户端下线, 更新name_sock_map表
+			std::cout << login_name << "下线\n";
+			closesocket(conn);
+			name_sock_map.erase(login_name);
+		} else {
+			std::cout << "从" << login_name << "转发消息:\"" << sendstr << "\"到" << target_name << std::endl;
+			sendstr = "[" + login_name + "]" + sendstr;	// 格式化为"[login_name]message..."
+			send(target_conn, sendstr.c_str(), sendstr.length(), 0);	// 将消息转发给目标客户端
+		}
+	}
+	else if (str.find("[group_num]") == 0) {	// 绑定群聊号
+		group_num = std::stoi(str.substr(11));	// 去掉前缀[group], 转换成数字
+
+		std::cout << "客户端[" << conn << "]加入群组" << group_num << std::endl;
+
+		group_sock_lock.lock();
+		group_sock_map[group_num].insert(conn);	// 将当前客户端的sockfd加入群聊中
+		group_sock_lock.unlock();
+	}
+	else if (str.find("[gr_message]") == 0)	{	// 群聊消息
+		sendstr = str.substr(12);	// 去掉前缀[gr_message]
+		std::cout << "来自" << login_name << "向群" << group_num << "发送消息: " << sendstr << std::endl;
+		sendstr = "[" + login_name + "]" + sendstr;
+		for (auto c : group_sock_map[group_num]) {
+			if (c != conn)
+				send(c, sendstr.c_str(), sendstr.length(), 0);
+		}
 	}
 
 
@@ -179,4 +212,5 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 	std::get<1>(info) = login_name;
 	std::get<2>(info) = target_name;
 	std::get<3>(info) = target_conn;
+	std::get<4>(info) = group_num;
 }
