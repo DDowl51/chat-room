@@ -7,28 +7,19 @@ void initialization() {
 	WSADATA wsadata;
 	int err;
 	err = WSAStartup(w_req, &wsadata);
-	if (err != 0) {
+	if (err != 0)
 		cout << "初始化套接字库失败！" << endl;
-	}
-	else {
-		cout << "初始化套接字库成功！" << endl;
-	}
 	//检测版本号
 	if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
 		cout << "套接字库版本号不符！" << endl;
 		WSACleanup();
 	}
-	else {
-		cout << "套接字库版本正确！" << endl;
-	}
-	//填充服务端地址信息
-
 }
 
 
 int main() {
 	initialization();
-	Client c("192.168.0.100", 8022);
+	Client c("192.168.0.100", SERVER_PORT);
 	c.run();
 	return 0;
 }

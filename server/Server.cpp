@@ -3,9 +3,10 @@
 
 std::unordered_map<std::string, int> Server::name_sock_map;
 std::unordered_map<int, std::set<int>> Server::group_sock_map;
+std::unordered_map<int, std::string> Server::sock_cookie_map;
 std::mutex Server::name_sock_lock;
 std::mutex Server::group_sock_lock;
-
+std::mutex Server::sock_cookie_lock;
 
 MYSQL *Server::mysql = mysql_init(mysql);
 
@@ -17,15 +18,22 @@ Server::Server(const char* ip, int port)
 	server_addr.sin_port = htons(port);
 	server_addr.sin_addr.s_addr = inet_addr(ip);
 	
-	if (mysql_real_connect(mysql, "127.0.0.1", "root", "0814", "chatroom", 3306, NULL, 0)) {
-		std::cout << "\n成功连接到mysql数据库\n";
-	}
+	if (mysql_real_connect(mysql, "127.0.0.1", "root", "0814", "chatroom", 3306, NULL, 0))
+		std::cout << "成功连接到mysql数据库\n";
 	else
-		std::cout << "\n连接到数据库失败\n";
+		std::cout << "连接到数据库失败\n";
+
+	if (RedisConnect("127.0.0.1", "AUTH 123654") == "OK")
+		std::cout << "成功连接到Redis服务器\n";
+	else
+		std::cout << "连接到Redis服务器失败\n";
 }
 
 Server::~Server()
 {
+	for (auto& c : name_sock_map) {
+		closesocket(c.second);	// c.second是客户端的sockfd
+	}
 	closesocket(sockfd);
 }
 
@@ -138,12 +146,44 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 				std::cout << "密码正确\n";
 				sendstr = "[ret]ok";
 
+				// 更新name_sock_map表
 				name_sock_lock.lock();
 				name_sock_map[name] = conn;	// 加入到name_sock_map表中, 代表用户已登录
 				name_sock_lock.unlock();
 
 				logined = true;
 				login_name = name;
+
+				// 生成cookie
+				srand(time(NULL));	// 用时间作为随机算法的种子
+				std::string cookie;
+				for (int i = 0; i < 10; i++) {	// 十位数cookie
+					int type = rand() % 3;	// 0:数字, 1:小写字母, 2:大写字母
+					int random;
+					switch (type) {
+					case 0:
+						random = rand() % 10;
+						cookie += '0' + random;
+						break;
+					case 1:
+						random = rand() % 26;
+						cookie += 'a' + random;
+						break;
+					case 2:
+						random = rand() % 26;
+						cookie += 'A' + random;
+						break;
+					}
+				}
+				std::cout << "生成cookie: " << cookie << std::endl;
+				std::string rCmd = "HSET session " + cookie + " " + login_name;	// "HGET session cookie login_name"
+				std::string result = RedisCommand(rCmd.c_str());	// 没有返回
+				std::cout << "Redis语句: " << rCmd << std::endl;
+				if (result != "(null)")
+					std::cout << "Redis: " << result << std::endl;
+
+				sendstr += cookie;	// 将生成的cookie发送到客户端
+
 			}
 			else { // 密码错误
 				sendstr = "[ret]incorrect_password";
@@ -204,6 +244,22 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 			if (c != conn)
 				send(c, sendstr.c_str(), sendstr.length(), 0);
 		}
+	}
+	else if (str.find("[cookie]") == 0) {	// cookie登录
+		std::string cookie = str.substr(8);
+		std::cout << "收到客户端[" << conn << "]的cookie: " << cookie << std::endl;
+		std::string rCmd = "HGET session " + cookie;
+		std::string result = RedisCommand(rCmd.c_str());	// 应该返回cookie对应的用户名, 否则返回"(null)"
+		if (result != "(null)" && result.substr(0, 3) != "ERR") {	// 找到对应用户, 直接登录
+			logined = true;
+			login_name = result;
+			std::cout << "找到用户" << login_name << std::endl;
+			result = "[ret]ok" + result;	// "[ret]oklogin_name" 即 [ret]ok+用户名
+		}
+		else
+			std::cout << "没有找到cookie对应的用户" << std::endl;
+		// 没有找到cookie对应的用户或者cookie过期, 直接返回"(null)", 客户端将不做处理
+		send(conn, result.c_str(), result.length(), 0);
 	}
 
 

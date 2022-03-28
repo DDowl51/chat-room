@@ -7,6 +7,8 @@
 #include <thread>
 #include <mysql.h>
 #include <regex>
+#include <fstream>
+
 #pragma comment(lib, "ws2_32.lib")
 /* ----- Header files----- */
 

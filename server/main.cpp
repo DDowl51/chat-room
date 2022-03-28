@@ -7,28 +7,24 @@ void initialization() {
 	WSADATA wsadata;
 	int err;
 	err = WSAStartup(w_req, &wsadata);
-	if (err != 0) {
+	if (err != 0)
 		cout << "初始化套接字库失败！" << endl;
-	}
-	else {
-		cout << "初始化套接字库成功！" << endl;
-	}
 	//检测版本号
 	if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
 		cout << "套接字库版本号不符！" << endl;
 		WSACleanup();
 	}
-	else {
-		cout << "套接字库版本正确！" << endl;
-	}
-	//填充服务端地址信息
-
 }
 
 
 int main() {
 	initialization();
-	Server s("192.168.0.100", 8022);
+	Server s("192.168.0.100", SERVER_PORT);
 	s.run();
+	
+	//std::cout << RedisConnect("127.0.0.1", "auth 123654") << std::endl;
+	//std::cout << RedisCommand("HSET session abcd ddowl") << std::endl;
+	//system("pause");
+
 	return 0;
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "global.h"
 
+#define SERVER_PORT 8023
 
 class Client {
 private:

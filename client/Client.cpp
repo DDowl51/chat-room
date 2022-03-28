@@ -82,7 +82,26 @@ void Client::HandleClient(int conn) {
 	char recvbuf[1000];
 	memset(recvbuf, 0, sizeof(recvbuf));
 
+	// 检查本地是否存在cookie, 存在则发送给服务器, 跳过登录
+	std::ifstream file;
+	file.open("cookie.txt");
+	if (file.is_open()) {
+		std::string cookie;
+		file >> cookie;
+		cookie = "[cookie]" + cookie;
+		send(conn, cookie.c_str(), cookie.length(), 0);
+		recv(conn, recvbuf, sizeof(recvbuf), 0);	// 接收结果
+		std::string ret(recvbuf);
+		if (ret.substr(0, 7) == "[ret]ok") {
+			logined = true;
+			login_name = ret.substr(7);
+		}
+	}
+	file.close();
+
 	while (1) {
+		if (logined)
+			break;
 		std::cout << "0. 退出\n1. 注册\n2. 登录\n";
 		fflush(stdin);
 		std::cin >> choice;
@@ -129,10 +148,8 @@ void Client::HandleClient(int conn) {
 
 			std::cout << "请输入用户名>";
 			std::cin >> name;
-			fflush(stdin);
 			std::cout << "请输入密码>";
 			std::cin >> pass;
-			fflush(stdin);
 
 			login = "[login]" + name + ":" + pass;
 
@@ -149,9 +166,15 @@ void Client::HandleClient(int conn) {
 			else if (rec == "[ret]incorrect_password") {
 				std::cout << "密码错误\n";
 			}
-			else if (rec == "[ret]ok") {
+			else if (rec.substr(0, 7) == "[ret]ok") {
 				std::cout << "登陆成功\n";
 				logined = 1;
+				login_name = name;
+				std::string cookie = rec.substr(7);
+				std::ofstream file;
+				file.open("cookie.txt", std::ios::out);
+				file.write(cookie.c_str(), cookie.length());
+				file.close();
 				break;
 			}
 		}
