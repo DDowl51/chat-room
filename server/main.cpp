@@ -8,16 +8,17 @@ void initialization() {
 	int err;
 	err = WSAStartup(w_req, &wsadata);
 	if (err != 0)
-		cout << "³õÊ¼»¯Ì×½Ó×Ö¿âÊ§°Ü£¡" << endl;
+		log(LogLevel::error, "³õÊ¼»¯Ì×½Ó×Ö¿âÊ§°Ü!");
 	//¼ì²â°æ±¾ºÅ
 	if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
-		cout << "Ì×½Ó×Ö¿â°æ±¾ºÅ²»·û£¡" << endl;
+		log(LogLevel::error, "Ì×½Ó×Ö¿â°æ±¾ºÅ²»·û!");
 		WSACleanup();
 	}
 }
 
 
 int main() {
+	// log(LogLevel::warning, "{}", "Test");
 	initialization();
 	Server s("192.168.0.100", SERVER_PORT);
 	s.run();

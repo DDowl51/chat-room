@@ -1,25 +1,5 @@
 #pragma once
-
-
-#include <iostream>
-#include <string>
-#include <thread>
-#include <mysql.h>
-#include <unordered_map>
-#include <mutex>
-#include <tuple>
-#include <set>
-#include <fstream>
-#include <winsock.h>
-#include <random>
-
-#include "HiRedis.h";
-
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "HiRedis.lib")
-#define SERVER_PORT 8023
-
-using connect_info = std::tuple<bool, std::string, std::string, int, int>;
+#include "global.h"
 
 
 class Server {

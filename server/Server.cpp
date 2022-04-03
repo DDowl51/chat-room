@@ -19,14 +19,14 @@ Server::Server(const char* ip, int port)
 	server_addr.sin_addr.s_addr = inet_addr(ip);
 	
 	if (mysql_real_connect(mysql, "127.0.0.1", "root", "0814", "chatroom", 3306, NULL, 0))
-		std::cout << "成功连接到mysql数据库\n";
+		log(LogLevel::info, "成功连接到mysql数据库");
 	else
-		std::cout << "连接到数据库失败\n";
+		log(LogLevel::warning, "连接到数据库失败");
 
 	if (RedisConnect("127.0.0.1", "AUTH 123654") == "OK")
-		std::cout << "成功连接到Redis服务器\n";
+		log(LogLevel::info, "成功连接到Redis服务器");
 	else
-		std::cout << "连接到Redis服务器失败\n";
+		log(LogLevel::warning, "连接到Redis服务器失败");
 }
 
 Server::~Server()
@@ -47,11 +47,10 @@ void Server::run()
 
 	while (1) {
 		client_sock = accept(sockfd, (SOCKADDR*)&client_addr, &len);
-		if (client_sock < 0) {
-			std::cout << WSAGetLastError() << std::endl;
-		}
+		if (client_sock < 0)
+			log(LogLevel::warning, "错误代码:{}", WSAGetLastError());
 		else
-			std::cout << "\n与客户端[" << client_sock << "]连接, 准备接受数据\n";
+			log(LogLevel::info, "与客户端[{}]连接, 准备接受数据", client_sock);
 
 
 		std::thread recvThread(RecvMsg, client_sock);
@@ -77,11 +76,11 @@ void Server::RecvMsg(int conn)
 		memset(recvbuf, 0, sizeof(recvbuf));
 		int ret = recv(conn, recvbuf, sizeof(recvbuf), 0);
 		if (ret > 0) {
-			std::cout << "收到消息: " << recvbuf << std::endl;
+			// log("收到消息: " + recvbuf, LogLevel::info);
 			HandleRequest(conn, recvbuf, info);
 		}
 		else {
-			std::cout << "ret=" << ret << ", 关闭与客户端[" << conn << "]的连接\n";
+			log(LogLevel::warning, "错误代码: {}, 关闭与客户端[{}]的连接", ret, conn);
 			closesocket(conn);
 			name_sock_map.erase(std::get<1>(info));
 			break;
@@ -110,18 +109,17 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 		int seperator = str.find(":"), length = str.length();
 		pass = str.substr(seperator + 1);
 		name = str.substr(5, length - pass.length() - 6/* sizeof("[reg]") + sizeof(":") */);
-		std::cout << "name: " << name << std::endl;
-		std::cout << "pass: " << pass << std::endl;
+		log(LogLevel::info, "用户名:{}, 密码:{}", name, pass);
 		// INSERT INTO users VALUES( "name", "pass" );
 		str = "INSERT INTO users VALUES( \"" + name + "\", \"" + pass + "\");";
-		std::cout << "SQL语句: " << str << std::endl;
+		log(LogLevel::info, "SQL语句:{}", str);
 		int ret = mysql_query(mysql, str.c_str());
 		if (ret) {
-			std::cout << "INSERT failed\n";
+			log(LogLevel::warning, "INSERT语句失败, 错误代码: {}", ret);
 			sendstr = "[ret]error";	// register failed
 		}
 		else {
-			std::cout << "INSERT success\n";
+			log(LogLevel::info, "INSERT语句成功");
 			sendstr = "[ret]ok";
 		}
 		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
@@ -132,18 +130,17 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 		int seperator = str.find(":"), length = str.length();
 		pass = str.substr(seperator + 1);
 		name = str.substr(7, length - pass.length() - 8/* sizeof("[reg]") + sizeof(":") */);
-		std::cout << "name: " << name << std::endl;
-		std::cout << "pass: " << pass << std::endl;
+		log(LogLevel::info, "用户名:{}, 密码:{}", name, pass);
 		// SELECT name, pass FROM users WHERE name="name";
 		sqlstatement = "SELECT name, pass FROM users WHERE name=\"" + name + "\";";
 		int ret = mysql_query(mysql, sqlstatement.c_str());
 		MYSQL_RES* result = mysql_store_result(mysql);
 		MYSQL_ROW sql_row = mysql_fetch_row(result);
 		if (!ret && sql_row) {	// 找到结果
-			std::cout << "MYSQL中的数据: name=" << sql_row[0] << ", pass=" << sql_row[1] << std::endl;
+			log(LogLevel::info, "找到MYSQL中的数据: name={}, pass={}", sql_row[0], sql_row[1]);
 			if (pass == sql_row[1]) {
 				// 密码正确
-				std::cout << "密码正确\n";
+				log(LogLevel::info, "客户端[{}]登陆时密码正确", conn);
 				sendstr = "[ret]ok";
 
 				// 更新name_sock_map表
@@ -175,40 +172,45 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 						break;
 					}
 				}
-				std::cout << "生成cookie: " << cookie << std::endl;
+				log(LogLevel::info, "生成cookie: {}", cookie);
 				std::string rCmd = "HSET session " + cookie + " " + login_name;	// "HGET session cookie login_name"
 				std::string result = RedisCommand(rCmd.c_str());	// 没有返回
-				std::cout << "Redis语句: " << rCmd << std::endl;
+				log(LogLevel::info, "Redis语句: {}", rCmd);
 				if (result != "(null)")
-					std::cout << "Redis: " << result << std::endl;
+					log(LogLevel::error, "Redis: {}", result);
+				// 设置Redis Key过期时间: 30s
+				//rCmd = "EXPIRE " + cookie + " 30";
+				//result = RedisCommand(rCmd.c_str());
+				//log(LogLevel::info, "Redis语句: {}", rCmd);
+				//if (result != "(null)")
+				//	log(LogLevel::error, "Redis: {}", result);
 
 				sendstr += cookie;	// 将生成的cookie发送到客户端
 
 			}
 			else { // 密码错误
 				sendstr = "[ret]incorrect_password";
-				std::cout << "密码错误\n";
+				log(LogLevel::info, "客户端[{}]登陆时密码错误", conn);
 			} 
 		}
 		else {	// 没找到该用户
-			std::cout << "不存在名为" << name << "的用户\n";
+			log(LogLevel::warning, "不存在名为[{}]的用户", name);
 			sendstr = "[ret]not_found";
 		}
 		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
 	}
 	else if (str.find("[target]") == 0) {	// 设置私聊对象 
 		std::string target = str.substr(8);
-		std::cout << "准备建立从" << login_name << "到" << target << "的连接\n";
 		if (name_sock_map.find(target) == name_sock_map.end()) {
 			// 目标未找到
-			std::cout << "未找到名为" << target << "的目标\n";
+			log(LogLevel::warning, "未找到名为[{}]的目标", target);
 			sendstr = "[ret]not_found";
 		}
 		else {
 			// 找到目标, 建立连接
-			std::cout << "建立从" << login_name << "到" << target_name << "的连接\n";
 			target_name = target;
 			target_conn = name_sock_map[target];
+			log(LogLevel::info, "准备建立从{}到{}的连接", login_name, target_name);
 			sendstr = "[ret]ok";
 		}
 		send(conn, sendstr.c_str(), sendstr.length(), 0);	// 向客户端返回结果
@@ -218,11 +220,11 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 		sendstr = str.substr(9);	// 去掉前缀"[message]"
 		if (sendstr == "exit") {
 			// 客户端下线, 更新name_sock_map表
-			std::cout << login_name << "下线\n";
+			log(LogLevel::info, "用户[{}]下线", login_name);
 			closesocket(conn);
 			name_sock_map.erase(login_name);
 		} else {
-			std::cout << "从" << login_name << "转发消息:\"" << sendstr << "\"到" << target_name << std::endl;
+			log(LogLevel::info, "从{}转发消息:\"{}\"到{}", login_name, sendstr, target_name);
 			sendstr = "[" + login_name + "]" + sendstr;	// 格式化为"[login_name]message..."
 			send(target_conn, sendstr.c_str(), sendstr.length(), 0);	// 将消息转发给目标客户端
 		}
@@ -230,15 +232,14 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 	else if (str.find("[group_num]") == 0) {	// 绑定群聊号
 		group_num = std::stoi(str.substr(11));	// 去掉前缀[group], 转换成数字
 
-		std::cout << "客户端[" << conn << "]加入群组" << group_num << std::endl;
-
+		log(LogLevel::info, "用户[{}]加入群组[{}]", login_name, group_num);
 		group_sock_lock.lock();
 		group_sock_map[group_num].insert(conn);	// 将当前客户端的sockfd加入群聊中
 		group_sock_lock.unlock();
 	}
 	else if (str.find("[gr_message]") == 0)	{	// 群聊消息
 		sendstr = str.substr(12);	// 去掉前缀[gr_message]
-		std::cout << "来自" << login_name << "向群" << group_num << "发送消息: " << sendstr << std::endl;
+		log(LogLevel::info, "用户[{}]向群[{}]发送消息: {}", login_name, group_num, sendstr);
 		sendstr = "[" + login_name + "]" + sendstr;
 		for (auto c : group_sock_map[group_num]) {
 			if (c != conn)
@@ -247,17 +248,17 @@ void Server::HandleRequest(int conn, std::string str, connect_info& info) {
 	}
 	else if (str.find("[cookie]") == 0) {	// cookie登录
 		std::string cookie = str.substr(8);
-		std::cout << "收到客户端[" << conn << "]的cookie: " << cookie << std::endl;
+		log(LogLevel::info, "收到客户端[{}]的cookie: {}", conn, cookie);
 		std::string rCmd = "HGET session " + cookie;
 		std::string result = RedisCommand(rCmd.c_str());	// 应该返回cookie对应的用户名, 否则返回"(null)"
 		if (result != "(null)" && result.substr(0, 3) != "ERR") {	// 找到对应用户, 直接登录
 			logined = true;
 			login_name = result;
-			std::cout << "找到用户" << login_name << std::endl;
+			log(LogLevel::info, "找到用户{}", login_name);
 			result = "[ret]ok" + result;	// "[ret]oklogin_name" 即 [ret]ok+用户名
 		}
 		else
-			std::cout << "没有找到cookie对应的用户" << std::endl;
+			log(LogLevel::info, "没有找到cookie对应的用户");
 		// 没有找到cookie对应的用户或者cookie过期, 直接返回"(null)", 客户端将不做处理
 		send(conn, result.c_str(), result.length(), 0);
 	}
